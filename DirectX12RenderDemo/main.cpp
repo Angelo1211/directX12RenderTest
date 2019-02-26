@@ -26,6 +26,26 @@ LRESULT CALLBACK Main_Window_Callback(HWND   window_handle, //Essentially like a
             OutputDebugStringA("WM_ACTIVATEAPP\n");
         break;
 
+        case WM_PAINT: // We clear the window
+        {
+            PAINTSTRUCT paint; // This struct contains the info we need to paint a window
+            HDC device_context = BeginPaint(window_handle, &paint); // We're about to update our window
+            int X = paint.rcPaint.left;
+            int Y = paint.rcPaint.top;
+            int height = paint.rcPaint.bottom - paint.rcPaint.top; 
+            int width  = paint.rcPaint.right - paint.rcPaint.left; 
+            static DWORD Operation = WHITENESS;
+            PatBlt(device_context,X, Y, width, height, Operation);
+            if(Operation == WHITENESS){
+                Operation = BLACKNESS;
+            }
+            else{
+                Operation = WHITENESS;
+            }
+            EndPaint(window_handle, &paint); // We're done updating the window
+
+        }break; 
+
         default: // For Everything else we run the default windows procedure that takes care of all other messages
             Result = DefWindowProc(window_handle, message, WParam, LParam );
         break;
@@ -110,7 +130,7 @@ int CALLBACK WinMain(HINSTANCE hInstance,     //Handle to current program
         else
         {
             TranslateMessage(&msg); // Translate keyboard messages into more pproper messages ????
-            DispatchMessage(&msg);  // 
+            DispatchMessage(&msg);  // Actually deal with message
         }
     }
 
