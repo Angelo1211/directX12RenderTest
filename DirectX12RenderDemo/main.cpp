@@ -493,8 +493,8 @@ bool renderer_init()
         2. the tyupe id oft he interface we will be using
         3. pointer to a poitner to a command allocator interface
     */
-    
-    for(int i = 0; i < framebuffer_count ; ++i)
+
+    for (int i = 0; i < framebuffer_count; ++i)
     {
         result = renderer_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&command_allocators[i]));
         if (FAILED(result))
@@ -502,6 +502,50 @@ bool renderer_init()
             return false;
         }
     }
+
+    // -- Creating the command lists -- //
+    /*
+        You want as many command lists as you have threads recording commands. We are not making a multi threaded app, so we only need one. 
+        Command lists can be reset immediately after we call execute on a command queue with taht command lists. This is why we only need one command list but 3 allocators. 
+        To create a command list we can call the createCommandlist method.
+        1. This specifies which GPU to use
+        2. A struct which specifies which type of command list we want to create
+        3. We need to specify a command allocator that will store the commands on the gpu made by the command list
+        4. Starting pipeline state object for the command list. It is a pointer to the pipelinestate interface. 
+            At least need to speficy a vertex shader. But right now we are only clearing the render target so we can leave it to null. 
+        5,6 the same id and pointer to pointer thign we have seen so many times now
+
+        We need to use an enum to determine which kind of command list type we want
+        1. A Direct command list is one where commands can be executed by the GPU. This is what we want to create.
+        2. A bundle is a list of commands that are used often. Cannot be exectued directly by a command queue, a direct command list must execute the bundles. It inherits all pipeline state except  
+            for the current set PSO. 
+        3. A compute command list is for compute shaders
+        4. A copy command list option
+
+        We need to create a command list so that we can execute our clear render target command. 
+        We do this by specifying the D3D12 command list type direct
+        Since we only need one command list which is reset each frame when we specify a command allocator, we jsut create this command list with the first command allocator
+        When a command list is created, it is created in the "recording " state. We do not want to record the command list yet so we close the command list after creating it.
+    */
+
+    //Create the command list with the first allocator
+    result = renderer_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, command_allocators[0], NULL, IID_PPV_ARGS(&command_list));
+    if (FAILED(result))
+    {
+        return false;
+    }
+
+    // Command lists are created in a recording state. Our main loop will set up for recording again so let's close it for now. 
+    command_list->Close();
+
+    // -- Creating a Fence and a & Fence Event -- //
+    /*
+        The final initialization (woohoo!!)
+        Requires creating a fence and a fence event
+        We are only using a single thread, so we only need one fence event, but since we are triple buffering, we need three fences, one for each frame buffer. We also have three current fence value
+        reprecented in the fence value array. 
+        The first thing we will do is create 3 fences by 
+    */
 
     return true;
 }
