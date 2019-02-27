@@ -465,8 +465,8 @@ bool renderer_init()
     //Get a handle to the first descriptor in the descriptor heap. A handle is basically a pointer,
     //But we cannot literally use it like a c++ pointer. Only directx can handle it like it deserves
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvhandle(descriptorheap_rtv->GetCPUDescriptorHandleForHeapStart());
-
-
+    //randomname
+   
 
 
     return true;
