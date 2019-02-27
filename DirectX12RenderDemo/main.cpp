@@ -396,8 +396,8 @@ bool renderer_init()
                              &swapchain_desc,  // Give it the swap chain description that we created above
                              &swapchain_temp); // Store the created swap chain in a temp IDXGISwapChain interface
 
-    //We cast it because we want to call the getcurrentbackbufferindex function 
-    renderer_swapchain = static_cast<IDXGISwapChain3*>(swapchain_temp);
+    //We cast it because we want to call the getcurrentbackbufferindex function
+    renderer_swapchain = static_cast<IDXGISwapChain3 *>(swapchain_temp);
     frame_index = renderer_swapchain->GetCurrentBackBufferIndex();
 
     // -- Creating the Back Buffers (render target views ) Description Heap -- //
@@ -442,14 +442,14 @@ bool renderer_init()
     */
 
     //Describe the Render target views descriptor heap
-    D3D12_DESCRIPTOR_HEAP_DESC  heap_desc = {};
+    D3D12_DESCRIPTOR_HEAP_DESC heap_desc = {};
     //Number of descriptors for this heap
     heap_desc.NumDescriptors = framebuffer_count;
     //This heap is a renter target view heap
     heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    //This heap will not be directly referenced by shaders, as this will just store the output of the pipeline. 
+    //This heap will not be directly referenced by shaders, as this will just store the output of the pipeline.
     //Otherwise we would set the flag  to visible
-    heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE; 
+    heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
     result = renderer_device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&descriptorheap_rtv));
     if (FAILED(result))
@@ -464,9 +464,23 @@ bool renderer_init()
 
     //Get a handle to the first descriptor in the descriptor heap. A handle is basically a pointer,
     //But we cannot literally use it like a c++ pointer. Only directx can handle it like it deserves
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvhandle(descriptorheap_rtv->GetCPUDescriptorHandleForHeapStart());
-    //randomname22
-   
+    CD3DX12_CPU_DESCRIPTOR_HANDLE handle_rtv(descriptorheap_rtv->GetCPUDescriptorHandleForHeapStart());
+
+    // Create a RTV for each buffer (triple buffering will make 3 RTV)
+    for (int i = 0; i < framebuffer_count; ++i)
+    {
+        //First we get the nth buffer in the swap chain and store it in the n position of the resource array
+        result = renderer_swapchain->GetBuffer(i, IID_PPV_ARGS(&renderer_targets[i]));
+        if (FAILED(result))
+        {
+            return false;
+        }
+
+        //Then we create arender target view which binds the swap chain buffer to the rtv handle
+        renderer_device->CreateRenderTargetView(renderer_targets[i], nullptr, handle_rtv);
+
+        handle_rtv.Offset(1, descriptorSize_rtv);
+    }
 
 
     return true;
