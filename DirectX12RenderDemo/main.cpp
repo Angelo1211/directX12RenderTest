@@ -482,6 +482,26 @@ bool renderer_init()
         handle_rtv.Offset(1, descriptorSize_rtv);
     }
 
+    // -- Creating Command Allocators -- //
+    /*
+        Command allocators allocate memory on the GPU for the commands we want to execute by calling execute on the command queue and providing a command list with the command we want to
+        execute. We are using triple buffering, so we need to create 3 command allocators. We need three because we cannot reset a command allocator while the GPU is executign a command list
+        that is associated with it. To create a command allocator we use the createcommandallocator of hte device interface. 
+        1. The type of the allocator. We can have either a direct command, or a bndle command allocator. The direct command allocater can be associated with direct command lists, which are executed on the GPU
+            by callign execute on a command queue with the command list. A bundle command allocator stores commands for bundles. Bundles are used multiple times for many frames, so we do not want bundles to be
+            on the same command allocator as direct commands, because direct command allocators are reset every fra,e. We do not want to reset bundles, otherwise thta is wasteful
+        2. the tyupe id oft he interface we will be using
+        3. pointer to a poitner to a command allocator interface
+    */
+    
+    for(int i = 0; i < framebuffer_count ; ++i)
+    {
+        result = renderer_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&command_allocators[i]));
+        if (FAILED(result))
+        {
+            return false;
+        }
+    }
 
     return true;
 }
