@@ -23,9 +23,9 @@ ID3D12DescriptorHeap *descriptorheap_rtv; // Holds resources like render targets
 ID3D12Resource *renderer_targets[framebuffer_count];
 ID3D12CommandAllocator *command_allocators[framebuffer_count]; // One per each framebuffer * thread (we only have one thread for now)
 ID3D12GraphicsCommandList *command_list;                       // A command list we can record commands into and then execute them to render a frame
-ID3D12Fence1 *fence[framebuffer_count];                        // An object that is locked while command list is executed by the gpu. We need as many as we have allocators
-HANDLE fence_event;                                            // A handle to our event for when the fence is unlocked by the gpu
-UINT64 fence_value[framebuffer_count];                         // This value is incremented each frame. Each fence has their own value
+ID3D12Fence1 *renderer_fence[framebuffer_count];               // An object that is locked while command list is executed by the gpu. We need as many as we have allocators
+HANDLE renderer_fence_event;                                   // A handle to our event for when the fence is unlocked by the gpu
+UINT64 renderer_fence_value[framebuffer_count];                // This value is incremented each frame. Each fence has their own value
 
 int frame_index;        // Current rtv we are on
 int descriptorSize_rtv; // Size of the rtv descriptor on the device  (all front and back buffers will be the same size)
@@ -535,7 +535,7 @@ bool renderer_init()
         return false;
     }
 
-    // Command lists are created in a recording state. Our main loop will set up for recording again so let's close it for now. 
+    // Command lists are created in a recording state. Our main loop will set up for recording again so let's close it for now.
     command_list->Close();
 
     // -- Creating a Fence and a & Fence Event -- //
@@ -544,11 +544,57 @@ bool renderer_init()
         Requires creating a fence and a fence event
         We are only using a single thread, so we only need one fence event, but since we are triple buffering, we need three fences, one for each frame buffer. We also have three current fence value
         reprecented in the fence value array. 
-        The first thing we will do is create 3 fences by 
+
+        The first thing we will do is create 3 fences by using the createfence function from the device interface (for each fence)
+        1. initial value we want the fence to start with
+        2. The flag is for a shared fence, we are not sharing fence, so we can set it to none.
+        3 & 4 typical id type and pointer to pointer stuff 
+
+        Once we create all three fences and initialize the fence value array we create a fence event using the windows createevent function:
+        1. This is a pointer toa security attribute structure, setting this to null will use the default security structure
+        2. If this is set to true we will have to atuomatically reset the even to not triggered by using the resetevent function 
+            setting this to false will cause the even to automaticall reset to not tirggered after we have waited for hte fence event
+        3. setting this to true will cause the initial state to be signaled, we dont want this
+        4. setting this will make the event be created without a name
     */
+
+    //Creating the fence
+    for (int i = 0; i < framebuffer_count; ++i)
+    {
+        result = renderer_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&renderer_fence[i]));
+        if (FAILED(result))
+        {
+            return false;
+        }
+        renderer_fence_value[i] = 0;
+    }
+
+    //create a handle to the fence event
+    renderer_fence_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (renderer_fence_event == nullptr)
+    {
+        return false;
+    }
 
     return true;
 }
+
+//Currently does nothing, but we will add logic to this function that can run while the gpu is executign a command queue. We could have changed the render target color here if we wanted to change each frame
+void general_update()
+{
+
+}
+
+//This function is where we will add command to the command list. 
+//Which include changing the state of the render target
+//Setting the root signature
+//Clearing the render target
+//Here we will be setting vertex buffers and calling draw in this function
+void pipeline_update()
+{
+
+}
+
 
 void renderer_cleanup()
 {
