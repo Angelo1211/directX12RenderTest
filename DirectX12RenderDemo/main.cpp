@@ -212,19 +212,21 @@ void window_loop()
 {
     MSG msg;
 
-    while (true)
+    while (running)
     {
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
-            if (msg.message == WM_QUIT)
-                break;
+            if (msg.message == WM_QUIT) break;
 
             TranslateMessage(&msg); // Translate keyboard messages into more pproper messages ????
             DispatchMessage(&msg);  // Actually deal with message
         }
         else
         {
-            //Render loop
+            //run game code
+            general_update(); //Update engine logic
+            //Execute the commandqueue (rendering the scene is the result oft he gpu executing the command lists)
+            renderer_render(); 
         }
     }
 }
@@ -253,6 +255,7 @@ LRESULT CALLBACK window_Callback(HWND window_handle, //Essentially like a pointe
         break;
 
     case WM_DESTROY: // After the window is destroyed
+        running = false;
         PostQuitMessage(0);
         break;
 
