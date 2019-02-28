@@ -13,6 +13,7 @@ LPCTSTR window_title = "DirectX12 Demo Window";
 int width = 800;
 int height = 600;
 bool fullscreen = false;
+bool running = true; // exit when this becomes false
 
 //D3D declarations
 const int framebuffer_count = 3; // triple buffering
@@ -215,7 +216,6 @@ void window_loop()
         else
         {
             //Render loop
-            OutputDebugStringA("YEEET\n");
         }
     }
 }
@@ -582,19 +582,128 @@ bool renderer_init()
 //Currently does nothing, but we will add logic to this function that can run while the gpu is executign a command queue. We could have changed the render target color here if we wanted to change each frame
 void general_update()
 {
-
 }
 
-//This function is where we will add command to the command list. 
+//This function is where we will add command to the command list.
 //Which include changing the state of the render target
 //Setting the root signature
 //Clearing the render target
 //Here we will be setting vertex buffers and calling draw in this function
 void pipeline_update()
 {
+    HRESULT result;
 
+    /*
+        Command allocators cannot be reset while the GPU is executing commands from a command list associated with it. This is why we have fences and the fence event
+        The first thing we do before we set this frames command allocator is make sure the GPU is finished executing the command list that was associated with this command allocator
+
+        In the render function, after we call execute on the command queue we call signal on the command queue. This will insert a command after the command list we jsut executed that willi increment
+        this frames fence value. We call wait fro previous frame whichc will check the value of the fence and see if it has been incremented. If it has, we know the command list that frame has been executed and it is safe
+        to reset the command allocator.
+
+        After we have rest this frames command allocator we want to reset the command list. Unlike command allocator, once we call execute on a command queue we can immediately reset the command list and reuse it.
+        So if we reset the command list here giving it this frames command allocator and a null PSO.
+        Resettign a command list put its on the recording state
+    */
+
+    //We have to wait fro the gpu to finish with the command allocator before we reset it
+    renderer_wait();
+
+    //We can only reset an allocator once the gpu is done with it
+    //Resetting an allocator frees the memory that the command list was stored in
+    result = command_allocators[frame_index]->Reset();
+    if (FAILED(result))
+    {
+        running = false;
+    }
+
+    /*
+        Reset the command list
+
+        By resetting it we put it into a recording mode so we can record it to the command allocator
+        the command allocator that we reference might have multiple command lists associated with it
+        only one can be recording at a given time
+        Make sure all other command lists associated with this command allocator are in the closed state
+        Here you will pass an initial pipeline state object as the second parameter
+        In the tutorial we are onyl clearing the rtv and do not need anything but an initial default pipeline, which is what we get by setting the second parameter to null
+    */
+    result = command_list->Reset(command_allocators[frame_index], NULL);
+    if ( FAILED(result))
+    {
+        running = false;
+    }
+
+    /*
+        Recording command with the command list
+
+        We will only record commands to change state of the previous and current render target resources, and clearing the render target to a certain color.
+        Render target resources must be in the render target state for hte output merger to output on. We can change the state of a resource using a resource barrier.
+        This is done with the command list's interface resource barrier command. 
+        We need a transition barrier because we are transitionting the state of the render target from the presetn state which it needs to be in for the swap chain to preseint it 
+        to the render target state which it needs to be in for the output merger to ouput on  
+        1. the number of barrier descriptions we are submitting
+        2. the pointer to an array of d3d12 resource barrier descriptions. 
+
+        This is where the helper library is useful again
+        We can use a transition resource barrier  to apss to the render target source our current state and what we wnat to transition to. 
+        Here we are transitioning the current render target from the present state to the render target state, so we can clear it with a color. 
+        AFter we have finishing with our commands for this render target we want to transition it's state again, but this time from render target state to present state.
+        So the swap chain can present it
+        We want to clear the render target
+        So we get a handle to the render target
+        We use the descriptor handle structure and provide it with the first description in the rtv heap the index of the current frame and the size of each rtv descriptor
+        basically get a pointer to the beginning of the descriptor heap and then increment taht pointer frame index times rtv descriptor size
+        Once we hava descriptor handle we need to set the current render target to be the output of the ouput merger, 
+        1. number of redner target descriptor handles
+        2. a pointer to an array of render target descriptor handles
+        3. If this is true then the previous pointer is a pointer to the begining of a contiguous chunk of descriptors in the descriptor heap.
+            When getting the next descriptor D3D offsets the current descriptor handle by the size of the descriptor typw. 
+            When setting it to false pRenderTargetDescriptors is a pointer to an array of render target descriptor handles. 
+            This is less efficient than when setting this to true because to get the next descriptor D3D needs to dereference the handle in the array to get the render target. 
+            Since we only have one render target, we set this to false because we are passing a reference to a handle to the only descriptor handle we are using.
+        4. A pointer to a depth/stencil descriptor handle. We set this to null in this tutorial because we do not have depth/stencil yet. 
+
+        Finally, to clear the render target we use the clear render target view command:
+        1. Rendertarget view: a descriptor handle to the render target we want to clear
+        2. An array of 4 floats representing red green blue and alpha
+        3. number of rects to clear, 0 clears the entire render target
+        4. pointer to an array of rect structures representing the rectangles on the render target you want to clear.
+            nice if you don't want to lcear the entire render target, but we do so we set it to null
+
+        Once we are finished with recording our commands, we need to close the command list. If we do not close it before we try to execute it the application will break. 
+        Another note on closing: if you do something ilegal during hte command list your program will continue to run until you call close where it will fail. You must enable the debug layer
+        in order to see what exactly failed when calling close. 
+    */
+
+    // Here we start recordign commands into the commandlist (which all the commands will be stored in the command allocator
+
+    //transition the frame index render target from the present state to the render target state, so the command list draws it starting from here
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderer_targets[frame_index], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET ));
+
+    // here we again get the handle to our current render target view so we can set it as the render target in the output merger state of the pipeline
+    CD3DX12_CPU_DESCRIPTOR_HANDLE handle_rtv(descriptorheap_rtv->GetCPUDescriptorHandleForHeapStart(), frame_index, descriptorSize_rtv);
+
+    // Set the render target for the output merger stage (the ouput of the pipeline)
+    command_list->OMSetRenderTargets(1, &handle_rtv, FALSE, nullptr);
+
+    //Clear the render target by using the ClearRenderTargetView command
+    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    command_list->ClearRenderTargetView(handle_rtv, clearColor, 0, nullptr);
+
+    //Transition the frameindex render target from the render target state to the present state. 
+    //If the debug layer is enabled you receive a warning if present is called on a render target taht is not in the present state
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderer_targets[frame_index], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+    result = command_list->Close();
+    if (FAILED(result))
+    {
+        running = false;
+    }
 }
 
+void renderer_wait()
+{
+}
 
 void renderer_cleanup()
 {
