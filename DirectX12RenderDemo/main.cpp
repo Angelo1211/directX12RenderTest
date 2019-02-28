@@ -5,7 +5,7 @@
 #include <d3dcompiler.h>
 #include <DirectXMath.h>
 #include "d3dx12.h"
-
+#define SAFE_RELEASE(x) if(x) { x->Release(); x = NULL; }
 //Globals
 HWND window_handle = NULL;
 LPCTSTR window_name = "Michael Scott";
@@ -91,6 +91,15 @@ int CALLBACK WinMain(HINSTANCE hInstance,     //Handle to current program
 
     //Run main render loop
     window_loop();
+
+    //we want to ait for hte gpu to finish executing commands before we release everything
+    renderer_wait();
+
+    //close the fence event
+    CloseHandle(renderer_fence_event);
+
+    //clean up after ourselves
+    renderer_cleanup();
 
     return 0;
 }
@@ -701,10 +710,124 @@ void pipeline_update()
     }
 }
 
-void renderer_wait()
-{
+void renderer_render(){
+    /*
+        First thing we do is update the pipeline, that is record the command list by calling the update pipeline function 
+        once the command list has been recorded we create an array of our command lists
+        we conly have one command list but if we had multiple threads we would have a command list for each thread here we would organize our command list in the array in the order
+        we want to execute them
+
+        we can execute command lists by calling execute command lists on the command queue and provide the number of command lists to execute and a pointer to the command list array
+        1. number of command lists to execute
+        2. an array of command lists to execute 
+
+        After we instruct the GPU to execute our command list we want to insert a command into the command queue to set the fence for this frame.
+        The signal method basically inserts another command that sets a fence to a speccific value and signals a fence event
+        we do this when we get back to this frame buffer so we can check to see if the gpu has finished executing the ocmmand list
+        we know when it has finished because the signal command will have been executed and the fence will have been set to the fvalue we told it to set it to
+        Finally we present the next back buffer by calling present method of the swapchain
+    */ 
+    HRESULT result;
+
+    //Update the pipeline by sending commands to the commandQueue
+    pipeline_update();
+
+    //Create an array of command lists (only one for us sadly)
+    ID3D12CommandList * command_temp_list[] = { command_list };
+
+    //execute the array of command lists
+    command_queue->ExecuteCommandLists(_countof(command_temp_list), command_temp_list);
+
+    //This command goes in at the end of our command queue. we will know when our command queeu has finished becasuse the fence value will be set to fenceValue from the GPU since the command
+    //queue is being executed on the GPU
+    result = command_queue->Signal(renderer_fence[frame_index], renderer_fence_value[frame_index]);
+    if (FAILED(result))
+    {
+        running = false; 
+    }
+
+    //present the current backbuffer
+    result = renderer_swapchain->Present(0,0);
+    if (FAILED(result))
+    {
+        running = false;
+    }
 }
 
+//Just releases all the interface objects we have claimed. Before we release we want to make sure that the gpu has finished with everything before we start releasing things
 void renderer_cleanup()
 {
+    //Wait for the gpu to finish all frames
+    for(int i =0; i < framebuffer_count; ++i)
+    {
+        frame_index = i;
+        renderer_wait();
+    }
+
+    //Get swapchain out of fullscreen before exiting
+    BOOL fs = false;
+    if( renderer_swapchain->GetFullscreenState(&fs, NULL))
+    {
+        renderer_swapchain->SetFullscreenState(false, NULL);
+    }
+
+    SAFE_RELEASE(renderer_device);
+    SAFE_RELEASE(renderer_swapchain);
+    SAFE_RELEASE(command_queue);
+    SAFE_RELEASE(descriptorheap_rtv);
+    SAFE_RELEASE(command_list);
+
+    for(int i = 0; i < framebuffer_count; ++i)
+    {
+        SAFE_RELEASE(renderer_targets[i]);
+        SAFE_RELEASE(command_allocators[i]);
+        SAFE_RELEASE(renderer_fence[i]);
+    }
+    
+}
+
+void renderer_wait()
+{
+    /*
+        Finally we have the wait for previous frame function
+        This function is where the fencer and fence event are needed 
+        The first thing we do is check the current value of the current frames fence
+        If the current value is less than the value we wanted it to be we know the GPU is still executing commands for htis frame and we must enter the if block where we set the fence event which will
+        get triggered once the fence value equals what we wnat it to equal
+
+        We do this with the setevent on completion method of the fence interface
+        1. this is the fvalue we want the fence to equal
+        2. This is the event we want triggered when the fence equals value
+
+        After we set up the even, we wait for it to be triggered. We do this with the windows wait for single object function
+        1. this is the fence event we wnat to be triggered. IF it happens to be triggered in the very small amount of time between this funcion call and the time we set the fence event this function will trigger immediately
+        2. this is the number of milliseconds we want to wait for hte fence event to be triggered. We can use the infinite macro which means this emthod will block forever or until the fence event is triggered.
+
+        Once the GPU has finished executing the frames command list we increment our fence value for this frame and set the current back buffer in the swap chain and continue
+    */
+
+    HRESULT result;
+
+    //swap the current rtv buffer index so we draw on the correct buffer
+    frame_index = renderer_swapchain->GetCurrentBackBufferIndex();
+
+    // if the current fence value is still less than "fence value", then we know that the gpu has not finished executing
+    // the command queue since it has not reached the command que command
+    if (renderer_fence[frame_index]->GetCompletedValue() < renderer_fence_value[frame_index])
+    {
+        //we have the fence create an event which is signaled once the fence's current value is the fencevalue
+        result = renderer_fence[frame_index]->SetEventOnCompletion(renderer_fence_value[frame_index], renderer_fence_event);
+        if(FAILED(result))
+        {
+            running = false;
+        }
+
+        //We will wiat until the fence has triggered the event that it's current value has reached "fenceValue". once it's value has
+        //reached the fence value we know the command queue has finished executing
+        WaitForSingleObject(renderer_fence_event, INFINITE);
+
+    }
+
+    //increment fencevalue for next frame
+    ++renderer_fence_value[frame_index];
 }
