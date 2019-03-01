@@ -6,6 +6,10 @@
 #include <DirectXMath.h>
 #include "d3dx12.h"
 #define SAFE_RELEASE(x) if(x) { x->Release(); x = NULL; }
+
+using namespace DirectX;
+
+
 //Globals
 HWND window_handle = NULL;
 LPCTSTR window_name = "Michael Scott";
@@ -27,14 +31,19 @@ ID3D12GraphicsCommandList *command_list;                       // A command list
 ID3D12Fence1 *renderer_fence[framebuffer_count];               // An object that is locked while command list is executed by the gpu. We need as many as we have allocators
 HANDLE renderer_fence_event;                                   // A handle to our event for when the fence is unlocked by the gpu
 UINT64 renderer_fence_value[framebuffer_count];                // This value is incremented each frame. Each fence has their own value
-ID3D12PipelineState *pipeline_object;                          // Pso containing a pipeline state
-ID3D12RootSignature *rootSignature;                            // Defines the data that shaders will access
-D3D12_VIEWPORT viewport;
-D3D12_RECT scissorRect;
-ID3D12Resource *vertexBuffer;
-
+ID3D12PipelineState *renderer_pipeline;                        // Pso containing our default pipeline state
+ID3D12RootSignature *renderer_rootsig;                         // We use it to say that the Input Assembler will be used, which means we will bind a vertex buffer containing info about each vertex
+D3D12_VIEWPORT renderer_viewport;                              // We only have one viewport because it will be drawing to a whole render target
+D3D12_RECT renderer_scissorRect;                               // Says where to draw and hwere not to draw. 
+ID3D12Resource *renderer_vertexBuffer;                         // Where we store our vertices 
+D3D12_VERTEX_BUFFER_VIEW renderer_vertexBuffer_view;           // Describes the address, stride and total siez of our vertex buffer and a pointer to the vertex data in gpu memory
 int frame_index;        // Current rtv we are on
 int descriptorSize_rtv; // Size of the rtv descriptor on the device  (all front and back buffers will be the same size)
+
+struct Vertex {
+    XMFLOAT3 pos;
+};
+
 
 //User made functions
 //Window window's handling
@@ -594,6 +603,202 @@ bool renderer_init()
     }
 
     return true;
+
+    // -- Creating Root signature -- //
+    /*
+        we need to create a root signature usinc the root signature desc struct
+        1. This is the number of slots our root signature will have. A slot is a root parameter, might be a constant, a descriptor or a descriptor table.
+        2. An array of root parameter structure which define each of the root parameters this root signature contains
+        3. This is the number of static smaplers the root signature will contain
+        4. An array of static sampler desc struct these struct define static samplers
+        5. A combination of flaps ored together
+
+        Theres are flags taht may be used when creating a root signature. In this tutorial we are only using the root signature that tells the pipeline to use the input assembler so we can pass the 
+        vertex buffer through the pipeline. The root signature will not have any root parameters for now.
+        
+        To tell the pipeline to use the input assembler we must create a root signature with the root signature flag allow inpu assembler inptu layour flag. Without this flag the input assembler will
+        not be used, and calling draw number of vertices will call the vertex shader number of vertices times with empty vertices. Basically we can create the vertices in teh vertex shader using the 
+        vertex index. We can pass these to the geometry shader to create more geometry. BY not using the flag we same one slot in the root signature that can be used for a root constant, root descriptor 
+        or descriptor table. The optimization ism inimal
+
+        If we use the layout flag we must create and use an input layout
+        In this tutorial we are going to pass a vertex buffer through the pipeline so we specify the d3d12 flag
+        The other flags are used to deny stages of the pipeline access to the root signature. When using resources or the root signature you want to deny any shaders taht do not need access so that the
+        GPU can optimize. Allowing all shaders access to everythign slows down performance. A lot of d312 functions allow to you pass an id3d blob pointer to store error messages in. You can pass a 
+        nullptr if you do not care to read the error. You can get a null terminated char array from the blob returned from these functions by calling the getbufferpointer method of the blobl.
+
+        We will define and create the root signature in code at runtime. IT could also be defined in hlsl instead 
+        The first thing we will do is fill ut a root signature desc  struct. We wnat the input assembler so we will specify that flag. 
+        once we have that description we will serialize it into bytecode. We will use that bytecode to create a root signature object
+    */ 
+
+    //create the root signature
+    CD3DX12_ROOT_SIGNATURE_DESC rootSig_desc;
+    rootSig_desc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+    ID3D10Blob *signature;
+    result = D3D12SerializeRootSignature( &rootSig_desc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, nullptr);
+    if( FAILED(result) )
+    {
+        return false;
+    }
+
+    result = renderer_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&renderer_rootsig));
+    if( FAILED(result) )
+    {
+        return false;
+    }
+
+    // -- Compiling vertex and pixel shaders -- //
+    /*
+        When creating a shader you msut provide a pointer to an ID3DBlob containing the sahder bytecode. When debugging, you want to compile the shaader files during runtime to catch any errors
+        in the shader. We can compile shader code at runtime using the td3dcompilefromfile function. This function compiles the shader code to shader bytecode and stores it in an Id3dblob object.
+        When you release you want to compile the shader to to compiled shader object files and load those raather than compiling shader code during runtime at initialization.
+        1. filename that contains the shader code
+        2. an array of shader macro structures that define shader macros. set to nullptr if not shaders are used
+        3. a pointer to an include interface which is used to handle #includes in the shader code. 
+        4. name of the shader function, we keep it to main
+        5. this is the shader model that we will like to use. We will use shader model 5.0
+        6. compile option flags ored together
+        7. more compile flags used for effect files, this will be ignored for now
+        8. poiinter to an id3dblocb that will pint to the compiled shader bytecode
+        9. pointer to another blob that will hold any errors that occur while compiling the shader code
+
+        If we get an erro we can access it with taht last parameter. The parameter is a null terminated string. We can cast the return of the gebufferpointer of the blob containt the error. 
+        When we create the pso we need to provide a d3d12 shader bytecode structure which contains the shader bytecode and the size of the shader bytecode
+        We get a pointer to the shader bytecode with thet getbuffer pointer method of the id3dblob we passed to d3dcompilefromfile we can get the size of the bytecode with the getbuffersize method of id3dblob
+
+    */
+    // create vertex and pixel shaders
+    
+    //compile vertex shader
+    ID3D10Blob *shader_vertex;  //vertex shader bytecode
+    ID3D10Blob *shader_error;  //vertex shader bytecode
+    result = D3DCompileFromFile(L"VertexShader.hlsl",
+                                nullptr,
+                                nullptr,
+                                "main",
+                                "vs_5_0",
+                                D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+                                0, 
+                                &shader_vertex,
+                                &shader_error);
+    if( FAILED(result) )
+    {
+        return false;
+    }
+
+    //Fill out the shader bytecode structure which is just a pointer to the shader bytecode and the size of the shader bytecode
+    D3D12_SHADER_BYTECODE shader_vertex_bytecode = {};
+    shader_vertex_bytecode.BytecodeLength  = shader_vertex->GetBufferSize();
+    shader_vertex_bytecode.pShaderBytecode = shader_vertex->GetBufferPointer();
+
+    //compile pixel shader
+    ID3D10Blob *shader_pixel;  //vertex shader bytecode
+    result = D3DCompileFromFile(L"PixelShader.hlsl",
+                                nullptr,
+                                nullptr,
+                                "main",
+                                "vs_5_0",
+                                D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+                                0, 
+                                &shader_pixel,
+                                &shader_error);
+    if( FAILED(result) )
+    {
+        return false;
+    }
+
+    //Fill out the shader bytecode structure which is just a pointer to the shader bytecode and the size of the shader bytecode
+    D3D12_SHADER_BYTECODE shader_pixel_bytecode= {};
+    shader_pixel_bytecode.BytecodeLength  = shader_pixel->GetBufferSize();
+    shader_pixel_bytecode.pShaderBytecode = shader_pixel->GetBufferPointer();
+
+    // -- Creating an Input layout-- //
+    /*
+        An input layout describes the vertices inside the vertex buffer that are passed to the input assembler. 
+        The input assembler will use the inpute layout to organize and pass vertices to the stages of the pipeline
+        To create an input layout we fill out an array of input element desc structure sone for each attribute of the vertex structure such  as position texture coordinates or color
+        1. Name of the parameter. The input assembler will associate the attribute to an input with the same semantic name in the shaders Can be anything as long as it matches shader
+        2. semantic index, only needed if you have more than one element with the same semantic name, kind of like color1 and color2
+        3. a DXGI format enumeration. The format the attribute is in. For example a float of 3 positions xyz with 4 bytes per value maps to a 32 bit argument and is mapped to a float3 parameter in the shader.
+        4. you can bind multiple vertex buffers to the input assembler each vertex buffer is boudn to a slot, we are only binding one vertex buffer at a time so we set it to zero
+        5. This is the offest in bytes from the beginning of the vertex structure to the start of this attribute. The first attribute will always be zero. WE only have one attribute, position. so we set this to zero.
+            when we get color we weill have a second attribute color which we will need to set to 12. 
+        6. Specifies if the element is per vertex or per instance. More important when we get to instancing. For now we are not instancing.
+        7. NUmber of instances to draw before going to the next element. If we set the d3d12 input classification per vertex data we must use 0
+
+        Once we create the input element array we fill out a a input layer desc struct. This structure will be passed as an argument when we create a pso
+        If we are not using the input assembler as defined in the root signature there would be no need for an input layout for any pso that are associated with the root signature.
+        We can get the size / number of elements of an array in c++ by using the sizeof(array) and divide that by the sizeof element to get the elemetns isnsde. 
+    */
+
+    //Creating the input layout
+    D3D12_INPUT_ELEMENT_DESC rendererer_layout[] = 
+    {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+    };
+
+    // fill out an input layout description structure
+    D3D12_INPUT_LAYOUT_DESC renderer_input_layout_Desc = {};
+
+    // We get the number of elemeents in an array by sizeof(array) / sizeof(arrayelementtype)
+    renderer_input_layout_Desc.NumElements = sizeof(rendererer_layout) / sizeof(D3D12_INPUT_ELEMENT_DESC);
+    renderer_input_layout_Desc.pInputElementDescs = rendererer_layout;
+
+    // -- Creating a Pipeline State Object PSO -- //
+    /*
+        For most applications you have many PSO's. For now we only need one
+        We need to fill the D3D12 graphics pipeline state desc structure
+        01. REQUIRED: a pointer to the root signature
+        02. REQUIRED: a pointer to the vertex shader bytecode
+        03. NOT REQUIRED: a pointer to the pixel shader bytecode
+        04. NOT REQURIED: a pointer to the domain shader bytecode
+        05. NOT REQUIRED: a pointer to the hull shader bytecode
+        06. NOT REQUIRED: a pointer to the geometry shader bytecode
+        07. NOT REQUIRED: stream output, used to send data from the pipeline after geometry or vertez to the app
+        08. REQUIRED: blend state, used for blending or transparency for now we havea default blend state.
+        09. REQUIRED: sample mask multisampling stuff 
+        10. REQUIRED: state of the rasterizer. We will use default
+        11. NOT REQUIRED: state of the depth/stencil buffer. 
+        12. NOT REQUIRED: a d3d12 input layout desc struct defining layout of a vertex
+        13. NOT REQUIRED: a buffer strip cut value enum used when a triangle strip topology is defined
+        14. REQUIRED: a topology type struct defining the way vertices are put together
+        15. REQUIRED: number of render target formats in the RTV parameter
+        16. REQUIRED: an array of enumerations explaining the format of each render target
+        17. NOT REQUIRED: an array of dxgi format enums explaining the format of each depth/stencil buffer. must be the same format as the depth stencil buffers used
+        18. REQUIRED: the sample coutn and quality for multi-sampling 
+        19. NOT REQUIRED: a bit mask saying which gpu adapter to use, we are only using one gpu so this is zero
+        20. NOT REQUIRED: a way to cache PSO's into files
+        21. NOT REQUIRED: a way to put debug info into the pipeline stat object
+    */
+
+    // Create a pipeline state object
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {};
+    pso_desc.InputLayout           = renderer_input_layout_Desc;
+    pso_desc.pRootSignature        = renderer_rootsig;
+    pso_desc.VS                    = shader_vertex_bytecode;
+    pso_desc.PS                    = shader_pixel_bytecode;
+    pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    pso_desc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
+    pso_desc.SampleDesc            = buffer_sample;
+    pso_desc.SampleMask            = 0xffffffff;
+    pso_desc.RasterizerState       = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    pso_desc.BlendState            = CD3DX12_BLEND_DESC(D3D12_DEFAULT); 
+    pso_desc.NumRenderTargets      = 1;
+
+    //create the pso
+    result = renderer_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&renderer_pipeline));
+    if( FAILED(result) )
+    {
+        return false;
+    }
+
+    // -- Creating a vertex Buffer -- //
+    /*
+        
+    */
 }
 
 //Currently does nothing, but we will add logic to this function that can run while the gpu is executign a command queue. We could have changed the render target color here if we wanted to change each frame
