@@ -27,6 +27,11 @@ ID3D12GraphicsCommandList *command_list;                       // A command list
 ID3D12Fence1 *renderer_fence[framebuffer_count];               // An object that is locked while command list is executed by the gpu. We need as many as we have allocators
 HANDLE renderer_fence_event;                                   // A handle to our event for when the fence is unlocked by the gpu
 UINT64 renderer_fence_value[framebuffer_count];                // This value is incremented each frame. Each fence has their own value
+ID3D12PipelineState *pipeline_object;                          // Pso containing a pipeline state
+ID3D12RootSignature *rootSignature;                            // Defines the data that shaders will access
+D3D12_VIEWPORT viewport;
+D3D12_RECT scissorRect;
+ID3D12Resource *vertexBuffer;
 
 int frame_index;        // Current rtv we are on
 int descriptorSize_rtv; // Size of the rtv descriptor on the device  (all front and back buffers will be the same size)
