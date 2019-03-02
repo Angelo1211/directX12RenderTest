@@ -1,14 +1,16 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <D3d12.h>
+#include <d3d12.h>
+#include <dxgi.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
 #include <DirectXMath.h>
 #include "d3dx12.h"
-#define SAFE_RELEASE(x) if(x) { x->Release(); x = NULL; }
+#include <string>
+
+#define SAFE_RELEASE(p) { if ( (p) ) { (p)->Release(); (p) = 0; } }
 
 using namespace DirectX;
-
 
 //Globals
 HWND window_handle = NULL;
@@ -34,16 +36,16 @@ UINT64 renderer_fence_value[framebuffer_count];                // This value is 
 ID3D12PipelineState *renderer_pipeline;                        // Pso containing our default pipeline state
 ID3D12RootSignature *renderer_rootsig;                         // We use it to say that the Input Assembler will be used, which means we will bind a vertex buffer containing info about each vertex
 D3D12_VIEWPORT renderer_viewport;                              // We only have one viewport because it will be drawing to a whole render target
-D3D12_RECT renderer_scissorRect;                               // Says where to draw and hwere not to draw. 
-ID3D12Resource *renderer_vertexBuffer;                         // Where we store our vertices 
+D3D12_RECT renderer_scissorRect;                               // Says where to draw and hwere not to draw.
+ID3D12Resource *renderer_vertexBuffer;                         // Where we store our vertices
 D3D12_VERTEX_BUFFER_VIEW renderer_vertexBuffer_view;           // Describes the address, stride and total siez of our vertex buffer and a pointer to the vertex data in gpu memory
-int frame_index;        // Current rtv we are on
-int descriptorSize_rtv; // Size of the rtv descriptor on the device  (all front and back buffers will be the same size)
+int frame_index;                                               // Current rtv we are on
+int descriptorSize_rtv;                                        // Size of the rtv descriptor on the device  (all front and back buffers will be the same size)
 
-struct Vertex {
+struct Vertex
+{
     XMFLOAT3 pos;
 };
-
 
 //User made functions
 //Window window's handling
@@ -230,7 +232,8 @@ void window_loop()
     {
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
-            if (msg.message == WM_QUIT) break;
+            if (msg.message == WM_QUIT)
+                break;
 
             TranslateMessage(&msg); // Translate keyboard messages into more pproper messages ????
             DispatchMessage(&msg);  // Actually deal with message
@@ -240,7 +243,7 @@ void window_loop()
             //run game code
             general_update(); //Update engine logic
             //Execute the commandqueue (rendering the scene is the result oft he gpu executing the command lists)
-            renderer_render(); 
+            renderer_render();
         }
     }
 }
@@ -562,7 +565,6 @@ bool renderer_init()
     }
 
     // Command lists are created in a recording state. Our main loop will set up for recording again so let's close it for now.
-    command_list->Close();
 
     // -- Creating a Fence and a & Fence Event -- //
     /*
@@ -602,8 +604,6 @@ bool renderer_init()
         return false;
     }
 
-    return true;
-
     // -- Creating Root signature -- //
     /*
         we need to create a root signature usinc the root signature desc struct
@@ -630,21 +630,21 @@ bool renderer_init()
         We will define and create the root signature in code at runtime. IT could also be defined in hlsl instead 
         The first thing we will do is fill ut a root signature desc  struct. We wnat the input assembler so we will specify that flag. 
         once we have that description we will serialize it into bytecode. We will use that bytecode to create a root signature object
-    */ 
+    */
 
     //create the root signature
     CD3DX12_ROOT_SIGNATURE_DESC rootSig_desc;
     rootSig_desc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
     ID3D10Blob *signature;
-    result = D3D12SerializeRootSignature( &rootSig_desc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, nullptr);
-    if( FAILED(result) )
+    result = D3D12SerializeRootSignature(&rootSig_desc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, nullptr);
+    if (FAILED(result))
     {
         return false;
     }
 
     result = renderer_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&renderer_rootsig));
-    if( FAILED(result) )
+    if (FAILED(result))
     {
         return false;
     }
@@ -670,48 +670,53 @@ bool renderer_init()
 
     */
     // create vertex and pixel shaders
-    
+
     //compile vertex shader
-    ID3D10Blob *shader_vertex;  //vertex shader bytecode
-    ID3D10Blob *shader_error;  //vertex shader bytecode
-    result = D3DCompileFromFile(L"VertexShader.hlsl",
+
+    char buf[256];
+    GetCurrentDirectoryA(256, buf);
+    OutputDebugStringA(buf);
+
+    ID3DBlob *shader_vertex; //vertex shader bytecode
+    ID3DBlob *shader_error;  //vertex shader bytecode
+    result = D3DCompileFromFile(L"DirectX12RenderDemo/vertex.hlsl",
                                 nullptr,
                                 nullptr,
                                 "main",
                                 "vs_5_0",
                                 D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
-                                0, 
+                                0,
                                 &shader_vertex,
                                 &shader_error);
-    if( FAILED(result) )
+    if (FAILED(result))
     {
         return false;
     }
 
     //Fill out the shader bytecode structure which is just a pointer to the shader bytecode and the size of the shader bytecode
     D3D12_SHADER_BYTECODE shader_vertex_bytecode = {};
-    shader_vertex_bytecode.BytecodeLength  = shader_vertex->GetBufferSize();
+    shader_vertex_bytecode.BytecodeLength = shader_vertex->GetBufferSize();
     shader_vertex_bytecode.pShaderBytecode = shader_vertex->GetBufferPointer();
 
     //compile pixel shader
-    ID3D10Blob *shader_pixel;  //vertex shader bytecode
-    result = D3DCompileFromFile(L"PixelShader.hlsl",
+    ID3DBlob *shader_pixel; //vertex shader bytecode
+    result = D3DCompileFromFile(L"DirectX12RenderDemo/pixel.hlsl",
                                 nullptr,
                                 nullptr,
                                 "main",
-                                "vs_5_0",
+                                "ps_5_0",
                                 D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
-                                0, 
+                                0,
                                 &shader_pixel,
                                 &shader_error);
-    if( FAILED(result) )
+    if (FAILED(result))
     {
         return false;
     }
 
     //Fill out the shader bytecode structure which is just a pointer to the shader bytecode and the size of the shader bytecode
-    D3D12_SHADER_BYTECODE shader_pixel_bytecode= {};
-    shader_pixel_bytecode.BytecodeLength  = shader_pixel->GetBufferSize();
+    D3D12_SHADER_BYTECODE shader_pixel_bytecode = {};
+    shader_pixel_bytecode.BytecodeLength = shader_pixel->GetBufferSize();
     shader_pixel_bytecode.pShaderBytecode = shader_pixel->GetBufferPointer();
 
     // -- Creating an Input layout-- //
@@ -734,10 +739,9 @@ bool renderer_init()
     */
 
     //Creating the input layout
-    D3D12_INPUT_ELEMENT_DESC rendererer_layout[] = 
-    {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
-    };
+    D3D12_INPUT_ELEMENT_DESC rendererer_layout[] =
+        {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
 
     // fill out an input layout description structure
     D3D12_INPUT_LAYOUT_DESC renderer_input_layout_Desc = {};
@@ -776,29 +780,149 @@ bool renderer_init()
     // Create a pipeline state object
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {};
-    pso_desc.InputLayout           = renderer_input_layout_Desc;
-    pso_desc.pRootSignature        = renderer_rootsig;
-    pso_desc.VS                    = shader_vertex_bytecode;
-    pso_desc.PS                    = shader_pixel_bytecode;
+    pso_desc.InputLayout = renderer_input_layout_Desc;
+    pso_desc.pRootSignature = renderer_rootsig;
+    pso_desc.VS = shader_vertex_bytecode;
+    pso_desc.PS = shader_pixel_bytecode;
     pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    pso_desc.RTVFormats[0]         = DXGI_FORMAT_R8G8B8A8_UNORM;
-    pso_desc.SampleDesc            = buffer_sample;
-    pso_desc.SampleMask            = 0xffffffff;
-    pso_desc.RasterizerState       = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    pso_desc.BlendState            = CD3DX12_BLEND_DESC(D3D12_DEFAULT); 
-    pso_desc.NumRenderTargets      = 1;
+    pso_desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    pso_desc.SampleDesc = buffer_sample;
+    pso_desc.SampleMask = 0xffffffff;
+    pso_desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    pso_desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    pso_desc.NumRenderTargets = 1;
 
     //create the pso
     result = renderer_device->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&renderer_pipeline));
-    if( FAILED(result) )
+    if (FAILED(result))
     {
         return false;
     }
 
     // -- Creating a vertex Buffer -- //
     /*
+        Vertex buffers are a list of vertex structures. To use a vertex structure we must get it to the GPUthen bind that vertex buffer to the input assembler.
+        To get a vertex buffer to the GPU there are two options. The first one is to use an upload heap and upload the vertez buffer to the GPU each frame. This is slow since we need
+        to copy teh vertex buffer from ram to video memory every frame. Thbe second option is to us an upload heap to upload the vertex buffer to the gpu then compy the data from the upload heap
+        to the default heap. Teh default heap will stay in memory until we overwrite or release it. Teh second approach is preferable as you only need to copy the data once when you need it for a while
+        and it is the way we will do it.
+
+        We create a list of vertices and store them in the vList array. Here we reate 3 vertices, defined already in view sapce which make up a triangle
+        to create a resource heap we use the create commited resource method of the device interface
+        1. A structure defining the heap properties we will use a helper struc to create the type of heap we want
+        2. A heap flag enumeration. WE will not have any flags
+        3. A structure describing the heap. we will use another helper structure
+        4. A resource state enum. This is the intiial state teh heap will be in. For the upload bugfger we want it to be in the read state. For the default heap we want it to be a copy destination
+            once we copy the vertex buffer to the default heap we will use ar esource abrrier ro transition the default heap from a copy destionation state to a vertex constant buffer state
+        5. A clear value structure. If this was ar ender target or depth stencil we coudl set this vcalue to the value the depth stencil buffer orrender target would usually get cleared to 
+            the gpu can do some optimizations to increase the performance of clearing a resource. Our resource is a vertex buffer, so we set thsi value to nullptr
+        6. Unique identifier for the type of the resulting resource interface
+        7. A pointer to a pointeer to the resoruce inter face object
+
+
+        We can set the name of the heap usign the setname method of the interface. This is useful for graphics debugging.
+        Once we create a vertex buffer (list of vertices ) we create an upload it to the default heap. The upload heap is used to upload the vertex buffer to the gpu so we can copy the data
+        to the default heap which will stay in memory until we either overwrite or release it
         
+        WE can copy the data from the upload heap to the default heap using the update subresources function
+        1. This is the command list we will use to creat thsi command which will copy the contents oft he upload heap to the defualt heap
+        2. This is the destination of the coy command. in our case it will be the default heap but it could bea readback hap
+        3. This is where we will copy the data from. here the upload heap but could also be default heap
+        4. number of bytes we want to offeset the start from. We want the whole vertex buffer to be copied so we will not offset at all
+        5. The index of the first subresource to start copying. Only have one so this will be zero
+        6. number of subresources we want to copy. We only have one so we set this to 1
+        7. Pointer to a d3d12 subresource data structue. This struc contains a pointer to the memory where our data is and the size in bytes of the resource
+
+        Once we create a copy command our command list stores it in its command allocator. waiting to be executed. Before we can use the vertex buffer stored in the default heap we must
+        make sure it is finished uploading and copying to the default heap
+        we close the command list tehn execuite it with the command queue we increment the fence value for this frame and tell the command queue to increment the fence on the gpu side.
+        Incrementing a fence is again a command which will ge exectued once the command list finish executing
+
+        After we execute the copy command and set the fence we need to fill out the vertex buffer view. This isa d3d12 vertex buffer view. 
     */
+
+    // Create the vertex buffer
+
+    //a triangle
+    Vertex vertex_list[] = {
+        {{0.0f, 0.5f, 0.5f}},
+        {{0.5f, -0.5f, 0.5f}},
+        {{-0.5f, -0.5f, 0.5f}},
+    };
+
+    int vertex_buffer_size = sizeof(vertex_list);
+
+    //create default heap
+    //default heapa is memory on the gpu only the gpu has accessto this memory.
+    //to get data into this heap we will have to upload the data using an upload heap
+    renderer_device ->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+                                              D3D12_HEAP_FLAG_NONE,
+                                              &CD3DX12_RESOURCE_DESC::Buffer(vertex_buffer_size),
+                                              D3D12_RESOURCE_STATE_COPY_DEST,
+                                              nullptr,
+                                              IID_PPV_ARGS(&renderer_vertexBuffer));
+
+    renderer_vertexBuffer->SetName(L"Vertex Buffer Resource Heap");
+
+    //create upload heap
+    //used to upload data to teh gpu, cpu can write and gpu can read
+    //we upload the vertex buffer using this heap
+    ID3D12Resource *buffer_vertex_upload_heap;
+    renderer_device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+                                             D3D12_HEAP_FLAG_NONE,
+                                             &CD3DX12_RESOURCE_DESC::Buffer(vertex_buffer_size),
+                                             D3D12_RESOURCE_STATE_GENERIC_READ,
+                                             nullptr,
+                                             IID_PPV_ARGS(&buffer_vertex_upload_heap));
+    
+    buffer_vertex_upload_heap->SetName(L"Vertex Buffer Upload Resource Heap");
+
+    //Store vertex buffer in upload heap[
+    D3D12_SUBRESOURCE_DATA vertex_data = {};
+    vertex_data.pData       = reinterpret_cast<BYTE*>(vertex_list);
+    vertex_data.RowPitch    = vertex_buffer_size;
+    vertex_data.SlicePitch  = vertex_buffer_size;
+
+    //We now create a command with the command list to copy data from.
+    UpdateSubresources(command_list, renderer_vertexBuffer, buffer_vertex_upload_heap, 0, 0, 1, &vertex_data);
+
+    //transition the vertex buffer dat from copy destination state to vertex buffer state
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderer_vertexBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
+
+    //now we execute the command list to upload the initial assets
+    command_list->Close();
+    ID3D12CommandList *p_command_lists[] = { command_list };
+    command_queue->ExecuteCommandLists(_countof(p_command_lists), p_command_lists);
+
+    // increment the fence value now, otherwise the buffer might not be uploaded by the time we start drawing
+    renderer_fence_value[frame_index]++;
+    result = command_queue->Signal(renderer_fence[frame_index], renderer_fence_value[frame_index]);
+    if (FAILED(result)){
+        running = false;
+    }
+
+    command_list->Close();
+    // create a vertex buffer view for the triangle
+    renderer_vertexBuffer_view.BufferLocation = renderer_vertexBuffer->GetGPUVirtualAddress();
+    renderer_vertexBuffer_view.StrideInBytes  = sizeof(Vertex);
+    renderer_vertexBuffer_view.SizeInBytes    = vertex_buffer_size;
+
+    //Fill out viewport
+    // The viewport will cover our entire  render target. commonly depth is between 0.0 and 1.0 in the screen space. The viewport will stretch the scene from viewpsace to screen space
+    renderer_viewport.TopLeftX = 0;
+    renderer_viewport.TopLeftY = 0;
+    renderer_viewport.Width    = width;
+    renderer_viewport.Height   = height;
+    renderer_viewport.MinDepth = 0.0f;
+    renderer_viewport.MaxDepth = 1.0f;
+
+    //Filling out a scissor rect. The scissor rect is defined in screen space, anything outside the scissor rect will not make it to the pixel shader.
+    renderer_scissorRect.left   = 0;
+    renderer_scissorRect.top    = 0;
+    renderer_scissorRect.right  = width;
+    renderer_scissorRect.left   = height;
+
+    return true;
 }
 
 //Currently does nothing, but we will add logic to this function that can run while the gpu is executign a command queue. We could have changed the render target color here if we wanted to change each frame
@@ -849,8 +973,8 @@ void pipeline_update()
         Here you will pass an initial pipeline state object as the second parameter
         In the tutorial we are onyl clearing the rtv and do not need anything but an initial default pipeline, which is what we get by setting the second parameter to null
     */
-    result = command_list->Reset(command_allocators[frame_index], NULL);
-    if ( FAILED(result))
+    result = command_list->Reset(command_allocators[frame_index], renderer_pipeline);
+    if (FAILED(result))
     {
         running = false;
     }
@@ -900,7 +1024,7 @@ void pipeline_update()
     // Here we start recordign commands into the commandlist (which all the commands will be stored in the command allocator
 
     //transition the frame index render target from the present state to the render target state, so the command list draws it starting from here
-    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderer_targets[frame_index], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET ));
+    command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderer_targets[frame_index], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
 
     // here we again get the handle to our current render target view so we can set it as the render target in the output merger state of the pipeline
     CD3DX12_CPU_DESCRIPTOR_HANDLE handle_rtv(descriptorheap_rtv->GetCPUDescriptorHandleForHeapStart(), frame_index, descriptorSize_rtv);
@@ -909,10 +1033,18 @@ void pipeline_update()
     command_list->OMSetRenderTargets(1, &handle_rtv, FALSE, nullptr);
 
     //Clear the render target by using the ClearRenderTargetView command
-    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    const float clearColor[] = {0.0f, 0.2f, 0.4f, 1.0f};
     command_list->ClearRenderTargetView(handle_rtv, clearColor, 0, nullptr);
 
-    //Transition the frameindex render target from the render target state to the present state. 
+    //Drawing a triangle
+    command_list->SetGraphicsRootSignature(renderer_rootsig);
+    command_list->RSSetViewports(1, &renderer_viewport);
+    command_list->RSSetScissorRects(1, &renderer_scissorRect);
+    command_list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    command_list->IASetVertexBuffers(0, 1, &renderer_vertexBuffer_view);
+    command_list->DrawInstanced(3,1,0,0);
+
+    //Transition the frameindex render target from the render target state to the present state.
     //If the debug layer is enabled you receive a warning if present is called on a render target taht is not in the present state
     command_list->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(renderer_targets[frame_index], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
 
@@ -923,7 +1055,8 @@ void pipeline_update()
     }
 }
 
-void renderer_render(){
+void renderer_render()
+{
     /*
         First thing we do is update the pipeline, that is record the command list by calling the update pipeline function 
         once the command list has been recorded we create an array of our command lists
@@ -939,14 +1072,14 @@ void renderer_render(){
         we do this when we get back to this frame buffer so we can check to see if the gpu has finished executing the ocmmand list
         we know when it has finished because the signal command will have been executed and the fence will have been set to the fvalue we told it to set it to
         Finally we present the next back buffer by calling present method of the swapchain
-    */ 
+    */
     HRESULT result;
 
     //Update the pipeline by sending commands to the commandQueue
     pipeline_update();
 
     //Create an array of command lists (only one for us sadly)
-    ID3D12CommandList * command_temp_list[] = { command_list };
+    ID3D12CommandList *command_temp_list[] = {command_list};
 
     //execute the array of command lists
     command_queue->ExecuteCommandLists(_countof(command_temp_list), command_temp_list);
@@ -956,11 +1089,11 @@ void renderer_render(){
     result = command_queue->Signal(renderer_fence[frame_index], renderer_fence_value[frame_index]);
     if (FAILED(result))
     {
-        running = false; 
+        running = false;
     }
 
     //present the current backbuffer
-    result = renderer_swapchain->Present(0,0);
+    result = renderer_swapchain->Present(0, 0);
     if (FAILED(result))
     {
         running = false;
@@ -971,7 +1104,7 @@ void renderer_render(){
 void renderer_cleanup()
 {
     //Wait for the gpu to finish all frames
-    for(int i =0; i < framebuffer_count; ++i)
+    for (int i = 0; i < framebuffer_count; ++i)
     {
         frame_index = i;
         renderer_wait();
@@ -979,7 +1112,7 @@ void renderer_cleanup()
 
     //Get swapchain out of fullscreen before exiting
     BOOL fs = false;
-    if( renderer_swapchain->GetFullscreenState(&fs, NULL))
+    if (renderer_swapchain->GetFullscreenState(&fs, NULL))
     {
         renderer_swapchain->SetFullscreenState(false, NULL);
     }
@@ -990,13 +1123,16 @@ void renderer_cleanup()
     SAFE_RELEASE(descriptorheap_rtv);
     SAFE_RELEASE(command_list);
 
-    for(int i = 0; i < framebuffer_count; ++i)
+    for (int i = 0; i < framebuffer_count; ++i)
     {
         SAFE_RELEASE(renderer_targets[i]);
         SAFE_RELEASE(command_allocators[i]);
         SAFE_RELEASE(renderer_fence[i]);
     }
-    
+
+    SAFE_RELEASE(renderer_pipeline);
+    SAFE_RELEASE(renderer_rootsig);
+    SAFE_RELEASE(renderer_vertexBuffer);
 }
 
 void renderer_wait()
@@ -1030,7 +1166,7 @@ void renderer_wait()
     {
         //we have the fence create an event which is signaled once the fence's current value is the fencevalue
         result = renderer_fence[frame_index]->SetEventOnCompletion(renderer_fence_value[frame_index], renderer_fence_event);
-        if(FAILED(result))
+        if (FAILED(result))
         {
             running = false;
         }
@@ -1038,7 +1174,6 @@ void renderer_wait()
         //We will wiat until the fence has triggered the event that it's current value has reached "fenceValue". once it's value has
         //reached the fence value we know the command queue has finished executing
         WaitForSingleObject(renderer_fence_event, INFINITE);
-
     }
 
     //increment fencevalue for next frame
