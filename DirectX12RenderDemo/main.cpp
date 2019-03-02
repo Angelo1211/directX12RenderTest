@@ -48,7 +48,9 @@ int descriptorSize_rtv;                                        // Size of the rt
 
 struct Vertex
 {
+    Vertex(float x, float y, float z, float r, float g, float b, float a) : pos(x, y, z), color(r, g, b, a) {}
     XMFLOAT3 pos;
+    XMFLOAT4 color;
 };
 
 //User made functions
@@ -749,7 +751,9 @@ bool renderer_init()
     //Creating the input layout
     D3D12_INPUT_ELEMENT_DESC rendererer_layout[] =
         {
-            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}
+        };
 
     // fill out an input layout description structure
     D3D12_INPUT_LAYOUT_DESC renderer_input_layout_Desc = {};
@@ -853,9 +857,9 @@ bool renderer_init()
 
     //a triangle
     Vertex vertex_list[] = {
-        {{0.0f, 0.5f, 0.5f}},
-        {{0.5f, -0.5f, 0.5f}},
-        {{-0.5f, -0.5f, 0.5f}},
+        { 0.0f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
+        { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
+        { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
     };
 
     int vertex_buffer_size = sizeof(vertex_list);
