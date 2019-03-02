@@ -8,6 +8,10 @@
 #include "d3dx12.h"
 #include <string>
 
+#pragma comment(lib, "dxgi.lib") 
+#pragma comment(lib, "d3d12.lib") 
+#pragma comment(lib, "d3dcompiler.lib") 
+
 #define SAFE_RELEASE(p) { if ( (p) ) { (p)->Release(); (p) = 0; } }
 
 using namespace DirectX;
@@ -164,7 +168,7 @@ bool window_init(HINSTANCE hInstance, int showWnd, int width, int height, bool f
     window_struct.cbWndExtra = 0;                          // Number of extra bytes to allocate following window instance? Again why would you even want this?
     window_struct.hInstance = hInstance;                   // A handle to the program instance that is in charge of the window can use get module handle to get it
     window_struct.hIcon = LoadIcon(NULL, IDI_APPLICATION); // A handle to the icon, if the member is null the system provides a default
-    window_struct.hCursor = NULL;                          // A handle to the cursor
+    window_struct.hCursor = LoadCursor(NULL, IDC_ARROW);                          // A handle to the cursor
     window_struct.lpszMenuName = NULL;                     // A menu name
     window_struct.hbrBackground = NULL;                    // A handle to background brush?? No idea what this is but if set to null the application must paint its own background
     window_struct.lpszClassName = window_name;             // The name of the class
@@ -183,7 +187,7 @@ bool window_init(HINSTANCE hInstance, int showWnd, int width, int height, bool f
     window_handle = CreateWindowExA(0,
                                     window_name,
                                     window_title,
-                                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                                    WS_OVERLAPPEDWINDOW,
                                     CW_USEDEFAULT,
                                     CW_USEDEFAULT,
                                     width,
@@ -227,6 +231,7 @@ If bot of the filter values are zero then windows returns all of the messages
 void window_loop()
 {
     MSG msg;
+    ZeroMemory(&msg, sizeof(MSG));
 
     while (running)
     {
@@ -242,6 +247,7 @@ void window_loop()
         {
             //run game code
             general_update(); //Update engine logic
+
             //Execute the commandqueue (rendering the scene is the result oft he gpu executing the command lists)
             renderer_render();
         }
@@ -355,6 +361,8 @@ bool renderer_init()
 
     // Use the default parameters
     D3D12_COMMAND_QUEUE_DESC command_description = {};
+    command_description.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+    command_description.Type  = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
     // create the command queue
     result = renderer_device->CreateCommandQueue(&command_description, IID_PPV_ARGS(&command_queue));
@@ -901,7 +909,6 @@ bool renderer_init()
         running = false;
     }
 
-    command_list->Close();
     // create a vertex buffer view for the triangle
     renderer_vertexBuffer_view.BufferLocation = renderer_vertexBuffer->GetGPUVirtualAddress();
     renderer_vertexBuffer_view.StrideInBytes  = sizeof(Vertex);
@@ -920,7 +927,7 @@ bool renderer_init()
     renderer_scissorRect.left   = 0;
     renderer_scissorRect.top    = 0;
     renderer_scissorRect.right  = width;
-    renderer_scissorRect.left   = height;
+    renderer_scissorRect.bottom = height;
 
     return true;
 }
