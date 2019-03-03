@@ -858,8 +858,8 @@ bool renderer_init()
     //a triangle
     Vertex vertex_list[] = {
         { 0.0f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f },
-        { 0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 0.0f, 1.0f },
-        { -0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+        { 0.5f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 1.0f },
+        { -0.5f, -0.5f, 0.5f, 0.0f, 1.0f, 1.0f, 1.0f },
     };
 
     int vertex_buffer_size = sizeof(vertex_list);
